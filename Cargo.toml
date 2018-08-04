@@ -1,0 +1,8 @@
+[package]
+name = "sktablelayout-rs"
+version = "0.1.0"
+authors = ["Joshua Cearley <joshua.cearley@gmail.com>"]
+
+[dependencies]
+"bitflags" = "1.0"
+
