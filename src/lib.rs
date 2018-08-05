@@ -168,7 +168,6 @@ bitflags! {
 pub type PositioningFn = FnMut(&(f32, f32, f32, f32));
 
 /// Encapsulates all properties for a cell; contributes to eventual layout decisions.
-#[derive(Clone)]
 pub struct CellProperties {
     /// Controls the desired sizes for this cell.
     pub size: SizeGrouping,
@@ -176,6 +175,10 @@ pub struct CellProperties {
     pub flags: CellFlags,
     /// Controls how many columns this cell will occupy.
     pub colspan: u8,
+    /// Applies positioning updates for this cell. Note that this
+    /// value always becomes `None` when cloned, so you cannot set
+    /// default callbacks for cell policies.
+    pub callback: Option<Box<PositioningFn>>
 }
 
 impl Default for CellProperties {
@@ -184,6 +187,18 @@ impl Default for CellProperties {
             size: Default::default(),
             flags: CellFlags::None,
             colspan: 1,
+            callback: None,
+        }
+    }
+}
+
+impl Clone for CellProperties {
+    fn clone(&self) -> Self {
+        CellProperties{
+            size: self.size.clone(),
+            flags: self.flags.clone(),
+            colspan: self.colspan.clone(),
+            callback: None,
         }
     }
 }
