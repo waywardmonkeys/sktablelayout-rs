@@ -3,7 +3,6 @@
 extern crate bitflags;
 
 use std::f32;
-use std::cell::RefCell;
 use std::cmp::max;
 use std::collections::BTreeMap;
 
@@ -178,7 +177,7 @@ pub struct CellProperties {
     /// Applies positioning updates for this cell. Note that this
     /// value always becomes `None` when cloned, so you cannot set
     /// default callbacks for cell policies.
-    pub callback: Option<Box<RefCell<PositioningFn>>>
+    pub callback: Option<Box<PositioningFn>>
 }
 
 impl Default for CellProperties {
@@ -221,6 +220,10 @@ pub struct TableLayout {
 }
 
 impl CellProperties {
+    pub fn new() -> Self {
+        Default::default()
+    }
+
     /// Inherits the default settings as determined by a
     /// `TableLayout`. Will first try to match the defaults for the
     /// column this would be added to, then the row, then the fallback
@@ -245,98 +248,114 @@ impl CellProperties {
         CellProperties{..layout.cell_defaults.clone()}
     }
 
-    pub fn minimum_size(&mut self, minimum: Size) -> &mut Self {
+    pub fn minimum_size(mut self, minimum: Size) -> Self {
         self.size.minimum = minimum;
         self
     }
 
-    pub fn maximum_size(&mut self, maximum: Size) -> &mut Self {
+    pub fn maximum_size(mut self, maximum: Size) -> Self {
         self.size.maximum = maximum;
         self
     }
 
-    pub fn preferred_size(&mut self, preferred: Size) -> &mut Self {
+    pub fn preferred_size(mut self, preferred: Size) -> Self {
         self.size.preferred = preferred;
         self
     }
 
-    pub fn expand(&mut self) -> &mut Self {
+    pub fn expand(mut self) -> Self {
         self.flags |= CellFlags::ExpandHorizontal | CellFlags::ExpandVertical;
         self
     }
 
-    pub fn expand_horizontal(&mut self) -> &mut Self {
+    pub fn expand_horizontal(mut self) -> Self {
         self.flags |= CellFlags::ExpandHorizontal;
         self
     }
 
-    pub fn expand_vertical(&mut self) -> &mut Self {
+    pub fn expand_vertical(mut self) -> Self {
         self.flags |= CellFlags::ExpandVertical;
         self
     }
 
-    pub fn fill(&mut self) -> &mut Self {
+    pub fn fill(mut self) -> Self {
         self.flags |= CellFlags::FillHorizontal | CellFlags::FillVertical;
         self
     }
 
-    pub fn fill_horizontal(&mut self) -> &mut Self {
+    pub fn fill_horizontal(mut self) -> Self {
         self.flags |= CellFlags::FillHorizontal;
         self
     }
 
-    pub fn fill_vertical(&mut self) -> &mut Self {
+    pub fn fill_vertical(mut self) -> Self {
         self.flags |= CellFlags::FillVertical;
         self
     }
 
-    pub fn anchor_top(&mut self) -> &mut Self {
+    pub fn anchor_top(mut self) -> Self {
         self.flags |= CellFlags::AnchorTop;
         self
     }
 
-    pub fn anchor_bottom(&mut self) -> &mut Self {
+    pub fn anchor_bottom(mut self) -> Self {
         self.flags |= CellFlags::AnchorBottom;
         self
     }
 
-    pub fn anchor_left(&mut self) -> &mut Self {
+    pub fn anchor_left(mut self) -> Self {
         self.flags |= CellFlags::AnchorLeft;
         self
     }
 
-    pub fn anchor_right(&mut self) -> &mut Self {
+    pub fn anchor_right(mut self) -> Self {
         self.flags |= CellFlags::AnchorRight;
         self
     }
 
-    pub fn anchor_center(&mut self) -> &mut Self {
+    pub fn anchor_center(mut self) -> Self {
         self.flags |= CellFlags::AnchorHorizontalCenter | CellFlags::AnchorVerticalCenter;
         self
     }
 
-    pub fn anchor_horizontal_center(&mut self) -> &mut Self {
+    pub fn anchor_horizontal_center(mut self) -> Self {
         self.flags |= CellFlags::AnchorHorizontalCenter;
         self
     }
 
-    pub fn anchor_vertical_center(&mut self) -> &mut Self {
+    pub fn anchor_vertical_center(mut self) -> Self {
         self.flags |= CellFlags::AnchorVerticalCenter;
         self
     }
 
-    pub fn uniform(&mut self) -> &mut Self {
+    pub fn uniform(mut self) -> Self {
         self.flags |= CellFlags::Uniform;
         self
     }
 
-    pub fn colspan(&mut self, span: u8) -> &mut Self {
+    pub fn colspan(mut self, span: u8) -> Self {
         self.colspan = span;
+        self
+    }
+
+    pub fn callback(mut self, fun: Box<PositioningFn>) -> Self {
+        self.callback = Option::Some(fun);
         self
     }
 }
 
 impl TableLayout {
+    pub fn new() -> TableLayout {
+        TableLayout {
+            cell_defaults:   Default::default(),
+            row_defaults:    BTreeMap::new(),
+            column_defaults: BTreeMap::new(),
+            opcodes:         Vec::new(),
+            row: 0,
+            column: 0,
+        }
+    }
+
     /// Calculates the number of rows and columns which exist in this table layout.
     pub fn get_rows_cols(&self) -> (u8, u8) {
         let mut cols   = 0;
@@ -374,16 +393,18 @@ impl TableLayout {
     }
 
     /// Adds a new row to the layout.
-    pub fn add_row(&mut self) {
+    pub fn with_row(&mut self) -> &mut Self {
         self.opcodes.push(LayoutOp::Row);
         self.row += 1;
-        self.column = 0
+        self.column = 0;
+        self
     }
 
     /// Hands the cell off to the layout.
-    pub fn add_cell(&mut self, properties: CellProperties) {
+    pub fn with_cell(&mut self, properties: CellProperties) -> &mut Self {
         self.column += properties.colspan;
-        self.opcodes.push(LayoutOp::Cell(properties))
+        self.opcodes.push(LayoutOp::Cell(properties));
+        self
     }
 
     pub fn impose(&mut self, width: f32, height: f32) {
@@ -391,6 +412,9 @@ impl TableLayout {
         let mut col: u8 = 0;
 
         let (total_rows, total_cols) = self.get_rows_cols();
+        if total_cols == 0 {return}
+        let total_rows = if total_rows == 0 { 1 } else { total_rows };
+        eprintln!("Imposing matrix: {}x{}", total_rows, total_cols);
 
         let mut col_sizes: Vec<SizeGrouping> = Vec::with_capacity(total_cols as usize);
         // XXX resize_with is unstable, but would do what we want just fine
@@ -446,7 +470,7 @@ impl TableLayout {
         }
 
         if error > 0.0 { // Extra space; relax the layout if we need to
-            return; // TODO: done for now!
+            // TODO: done for now!
         } else if error < 0.0 { // Not enough space; tense up some more!
             // We need to find slack space for each column
             let mut total_slack: f32 = 0.0;
@@ -474,7 +498,7 @@ impl TableLayout {
 	}
 
         if error > 0.0 { // Extra space; relax the layout if we need to
-            return; // TODO: done for now!
+            // TODO: done for now!
         } else if error < 0.0 { // Not enough space; tense up some more!
             // We need to find slack space for each column
             let mut total_slack: f32 = 0.0;
@@ -513,9 +537,8 @@ impl TableLayout {
 
                         // Run callback to impose layout.
                         match &mut cp.callback {
-                            Some(ref mut cb) => {
-                                let call = cb.get_mut();
-                                call(x+bx, y+by, bw, bh);
+                            Some(cb) => {
+                                (*cb)(x+bx, y+by, bw, bh);
                             }
                             None => {},
                         }

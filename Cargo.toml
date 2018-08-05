@@ -6,3 +6,6 @@ authors = ["Joshua Cearley <joshua.cearley@gmail.com>"]
 [dependencies]
 "bitflags" = "1.0"
 
+[lib]
+name="sktablelayout"
+
