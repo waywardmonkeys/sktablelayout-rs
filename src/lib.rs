@@ -3,6 +3,7 @@
 extern crate bitflags;
 
 use std::f32;
+use std::cell::RefCell;
 use std::cmp::max;
 use std::collections::BTreeMap;
 
@@ -48,11 +49,7 @@ impl Size {
 
     /// Returns whether this size should fit within another size.
     pub fn within(&self, other: &Size) -> bool {
-        if other.width > self.width && other.height > self.height {
-            true
-        } else {
-            false
-        }
+        other.width > self.width && other.height > self.height
     }
 }
 
@@ -94,19 +91,19 @@ impl SizeGrouping {
     /// Attempts to fit an `item` of a given size within an `area`, subject
     /// to layout rules specified by `flags`. Returns the X, Y coordinates
     /// as well as width and height of the box fitted to the area.
-    pub fn box_fit(&self, area: &Size, flags: &CellFlags) -> (f32, f32, f32, f32) {
+    pub fn box_fit(&self, area: &Size, flags: CellFlags) -> (f32, f32, f32, f32) {
         // combine maximum width and area width, depending on if fill has been actiated
         let w = if flags.contains(CellFlags::FillHorizontal) {
             f32::min(self.maximum.width, area.width)
         } else {
-            self.preferred.width
+            f32::min(self.preferred.width, area.width)
         };
 
         // combine maximum height and area height, depending on if fill has been actiated
         let h = if flags.contains(CellFlags::FillVertical) {
             f32::min(self.maximum.height, area.height)
         } else {
-            self.preferred.height
+            f32::min(self.preferred.height, area.height)
         };
 
         // find horizontal location of output box
@@ -165,7 +162,10 @@ bitflags! {
     }
 }
 
-pub type PositioningFn = FnMut(&(f32, f32, f32, f32));
+/// Allows a closure to ensure a layout item has been placed where the
+/// layout engine decided it should go. The parameters are the `x`,
+/// `y` coordinates, and the `width`/`height` respectively.
+pub type PositioningFn = FnMut(f32, f32, f32, f32);
 
 /// Encapsulates all properties for a cell; contributes to eventual layout decisions.
 pub struct CellProperties {
@@ -178,7 +178,7 @@ pub struct CellProperties {
     /// Applies positioning updates for this cell. Note that this
     /// value always becomes `None` when cloned, so you cannot set
     /// default callbacks for cell policies.
-    pub callback: Option<Box<PositioningFn>>
+    pub callback: Option<Box<RefCell<PositioningFn>>>
 }
 
 impl Default for CellProperties {
@@ -196,8 +196,8 @@ impl Clone for CellProperties {
     fn clone(&self) -> Self {
         CellProperties{
             size: self.size.clone(),
-            flags: self.flags.clone(),
-            colspan: self.colspan.clone(),
+            flags: self.flags,
+            colspan: self.colspan,
             callback: None,
         }
     }
@@ -419,7 +419,7 @@ impl TableLayout {
                         }
                         // Multi column is derpy since we have to spread the constraints across each column.
                         _ => {
-                            let midget = cp.size.spread(cp.colspan as f32);
+                            let midget = cp.size.spread(f32::from(cp.colspan));
                             row_sizes[row as usize] = SizeGrouping::join(&row_sizes[row as usize], &cp.size);
                             for _i in 0..cp.colspan {
                                 col_sizes[col as usize] = SizeGrouping::join(&col_sizes[col as usize], &midget);
@@ -495,7 +495,44 @@ impl TableLayout {
         }
 
         // Preparations complete. Now we pass the news along to our client.
+        let mut x = 0.0;
+        let mut y = 0.0;
+        row = 0;
+        col = 0;
+        for mut op in &mut self.opcodes {
+            // NB can probably make this mutable, and update it only when the row changes
+            let height = row_sizes[row as usize].preferred.height;
+            match op {
+                // Something that needs to be placed.
+                LayoutOp::Cell(cp) => match &cp.colspan {
+                    0 => {}, // Ignore this cell.
+                    1 => {
+                        let width = col_sizes[col as usize].preferred.width;
+                        let s = Size{width, height};
+                        let (bx, by, bw, bh) = cp.size.box_fit(&s, cp.flags);
 
+                        // Run callback to impose layout.
+                        match &mut cp.callback {
+                            Some(ref mut cb) => {
+                                let call = cb.get_mut();
+                                call(x+bx, y+by, bw, bh);
+                            }
+                            None => {},
+                        }
+
+                        x += width;
+                    },
+                    _ => panic!("Not implemente.d"),
+                },
+                // Increment to next row; reset placement cursors.
+                LayoutOp::Row => {
+                    x = 0.0;
+                    y += height;
+                    row += 1;
+                    col = 0;
+                }
+            }
+        }
     }
 }
 
