@@ -135,7 +135,7 @@ impl SizeGrouping {
 
 bitflags! {
     pub struct CellFlags: u16 {
-        const None                   = 0b0000_0000_0000_0001;
+        const None                   = 0b0000_0000_0000_0000;
         /// Expands cell to fill all remaining horizontal space.
         const ExpandHorizontal       = 0b0000_0000_0000_0001;
         /// Expands cell to fill all remaining vertical space.
@@ -446,13 +446,17 @@ impl TableLayout {
                         0 => {},
                         _ => {
                             let midget = cp.size.spread(f32::from(cp.colspan));
-                            row_sizes[row as usize] = SizeGrouping::join(&row_sizes[row as usize], &cp.size);
+                            eprintln!("{:#?}", cp.flags);
+                            row_sizes[row as usize] =
+                                SizeGrouping::join(&row_sizes[row as usize], &cp.size);
+                            if cp.flags.contains(CellFlags::ExpandVertical) {
+                                eprintln!("flagging row {} for x-expansion", row);
+                                has_yexpand[row as usize] = true
+                            }
                             for _i in 0..cp.colspan {
                                 if cp.flags.contains(CellFlags::ExpandHorizontal) {
+                                    eprintln!("flagging col {} for x-expansion", col);
                                     has_xexpand[col as usize] = true
-                                }
-                                if cp.flags.contains(CellFlags::ExpandVertical) {
-                                    has_yexpand[row as usize] = true
                                 }
                                 col_sizes[col as usize] = SizeGrouping::join(&col_sizes[col as usize], &midget);
                                 col += 1;
@@ -482,11 +486,16 @@ impl TableLayout {
             let expansions = has_xexpand.iter().filter(|x| **x).count();
             if expansions > 0 {
                 let amount = error / expansions as f32;
-                for (i, _e) in has_xexpand.iter().filter(|x| **x).enumerate() {
-                    col_sizes[i].preferred.width += amount;
+                for (i, e) in has_xexpand.iter().enumerate() {
+                    eprintln!("Expanding column {} = {}", i, e);
+                    if *e {
+                        col_sizes[i].preferred.width += amount;
+                    }
                 }
             }
         } else if error < 0.0 { // Not enough space; tense up some more!
+            let error = -error;
+            eprintln!("Error {}", error);
             // We need to find slack space for each column
             let mut total_slack: f32 = 0.0;
             slack.clear();
@@ -495,13 +504,22 @@ impl TableLayout {
                 slack[i] = x;
                 total_slack += x;
             }
+            eprintln!("Total width slack: {}", total_slack);
 
             // XXX if error > total_slack, it is impossible to solve this constraint
+            // spread error across slack space, proportionate to this areas slack participation
+            for mut s in &mut slack {
+                let norm = *s / total_slack;
+                let error_over_slack = error * norm;
+                eprintln!("slack contribution {}", norm);
+                eprintln!("error over slack {}", error_over_slack);
+                *s -= error_over_slack
+            }
 
             // Spread error across slack space.
             for (i, x) in slack.iter().enumerate() {
                 col_sizes[i].preferred.width =
-                    f32::max(col_sizes[i].preferred.width + x * (col_sizes[i].preferred.width / total_slack), 0.0);
+                    f32::max(col_sizes[i].minimum.width + *x, 0.0);
             }
         }
 
@@ -517,26 +535,40 @@ impl TableLayout {
             let expansions = has_yexpand.iter().filter(|y| **y).count();
             if expansions > 0 {
                 let amount = error / expansions as f32;
-                for (i, _e) in has_yexpand.iter().filter(|y| **y).enumerate() {
-                    row_sizes[i].preferred.height += amount;
+                for (i, e) in has_yexpand.iter().enumerate() {
+                    eprintln!("Expanding row {} = {}", i, e);
+                    if *e {
+                        row_sizes[i].preferred.height += amount;
+                    }
                 }
             }
         } else if error < 0.0 { // Not enough space; tense up some more!
-            // We need to find slack space for each column
+            let error = -error;
+            eprintln!("Error {}", error);
+            // We need to find slack space for each row
             let mut total_slack: f32 = 0.0;
             slack.clear();
             slack.resize(total_rows as usize, 0.0);
-            for (i, x) in row_sizes.iter().map(|x| x.preferred.height - x.minimum.height).enumerate() {
-                slack[i] = x;
-                total_slack += x;
+            for (i, y) in row_sizes.iter().map(|y| y.preferred.height - y.minimum.height).enumerate() {
+                slack[i] = y;
+                total_slack += y;
             }
+            eprintln!("Total height slack: {}", total_slack);
 
             // XXX if error > total_slack, it is impossible to solve this constraint
+            // spread error across slack space, proportionate to this areas slack participation
+            for mut s in &mut slack {
+                let norm = *s / total_slack;
+                let error_over_slack = error * norm;
+                eprintln!("slack contribution {}", norm);
+                eprintln!("error over slack {}", error_over_slack);
+                *s -= error_over_slack
+            }
 
             // Spread error across slack space.
-            for (i, x) in slack.iter().enumerate() {
+            for (i, y) in slack.iter().enumerate() {
                 row_sizes[i].preferred.height =
-                    f32::max(row_sizes[i].preferred.height + x * (row_sizes[i].preferred.height / total_slack), 0.0);
+                    f32::max(row_sizes[i].minimum.height + *y, 0.0);
             }
         }
 
@@ -581,6 +613,107 @@ impl TableLayout {
                 }
             }
         }
+    }
+}
+
+
+#[cfg(test)]
+mod test {
+    use ::*;
+    #[test]
+    fn expanding_layout() {
+        let mut engine = TableLayout::new();
+        engine.with_cell(CellProperties::new()
+                        .callback(Box::new(|x, y, w, h| {
+                            println!("{} {} {} {}", x, y, w, h);
+                            assert_eq!(x, 0.0);
+                            assert_eq!(y, 0.0);
+                            // these are expand, not fill, so the
+                            // cell takes up extra space but the
+                            // child item actually doesn't use it
+                            assert_eq!(w, 64.0);
+                            assert_eq!(h, 64.0);
+                        }))
+                        .anchor_right()
+                        .anchor_bottom()
+                        .preferred_size(Size{width: 64.0, height: 64.0}));
+        engine.with_cell(CellProperties::new()
+                        .callback(Box::new(|x, y, w, h| {
+                            println!("{} {} {} {}", x, y, w, h);
+                            // first column is neither expand nor
+                            // fill horizontal, so should be packed
+                            // as preferred width
+                            assert_eq!(x, 64.0);
+                            assert_eq!(y, 0.0);
+                            // these are expand, not fill, so the
+                            // cell takes up extra space but the
+                            // child item actually doesn't use it
+                            assert_eq!(w, 64.0);
+                            assert_eq!(h, 64.0);
+                        }))
+                        .anchor_top()
+                        .anchor_left()
+                        .expand_horizontal()
+                        .preferred_size(Size{width: 64.0, height: 64.0}));
+        engine.with_cell(CellProperties::new()
+                        .callback(Box::new(|x, y, w, h| {
+                            println!("{} {} {} {}", x, y, w, h);
+                            assert_eq!(y, 0.0);
+                            assert_eq!(h, 64.0);
+                        }))
+                        .anchor_right()
+                        .expand_horizontal()
+                        .fill_horizontal()
+                        .preferred_size(Size{width: 64.0, height: 64.0}));
+        engine.with_row();
+        engine.with_cell(CellProperties::new()
+                        .callback(Box::new(|x, y, w, h| {
+                            println!("{} {} {} {}", x, y, w, h);
+                            assert_eq!(x, 0.0);
+                            assert_eq!(y, 240.0 - 64.0);
+                            assert_eq!(w, 320.0);
+                        }))
+                        .colspan(3)
+                        .expand_vertical()
+                        .anchor_bottom()
+                        .fill_horizontal()
+                        .preferred_size(Size{width: 64.0, height: 64.0}));
+        engine.impose(320.0, 240.0);
+    }
+
+    #[test]
+    fn shrinking_layout() {
+        let mut engine = TableLayout::new();
+        engine.with_cell(CellProperties::new()
+                        .callback(Box::new(|x, y, w, h| {
+                            println!("{} {} {} {}", x, y, w, h);
+                            assert_eq!(x, 0.0);
+                            assert_eq!(y, 0.0);
+                            assert_eq!(w, 16.0);
+                            assert_eq!(h, 16.0);
+                        }))
+                        .preferred_size(Size{width: 64.0, height: 64.0}));
+        engine.with_cell(CellProperties::new()
+                        .callback(Box::new(|x, y, w, h| {
+                            println!("{} {} {} {}", x, y, w, h);
+                            assert_eq!(x, 16.0);
+                            assert_eq!(y, 0.0);
+                            assert_eq!(w, 16.0);
+                            assert_eq!(h, 16.0);
+                        }))
+                        .preferred_size(Size{width: 64.0, height: 64.0}));
+        engine.with_row();
+        engine.with_cell(CellProperties::new()
+                        .callback(Box::new(|x, y, w, h| {
+                            println!("{} {} {} {}", x, y, w, h);
+                            assert_eq!(x, 0.0);
+                            assert_eq!(y, 16.0);
+                            assert_eq!(w, 32.0);
+                            assert_eq!(h, 16.0);
+                        }))
+                        .colspan(2)
+                        .preferred_size(Size{width: 64.0, height: 64.0}));
+        engine.impose(32.0, 32.0);
     }
 }
 
