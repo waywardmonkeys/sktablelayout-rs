@@ -364,7 +364,7 @@ impl TableLayout {
 
         for op in &self.opcodes {
             match op {
-                LayoutOp::Cell(cp) => { cols += cp.colspan },
+                LayoutOp::Cell(cp) => { colcur += cp.colspan },
                 LayoutOp::Row => { cols = max(cols, colcur); colcur = 0; rows += 1 },
             }
         }
@@ -412,8 +412,7 @@ impl TableLayout {
         let mut col: u8 = 0;
 
         let (total_rows, total_cols) = self.get_rows_cols();
-        if total_cols == 0 {return}
-        let total_rows = if self.column > 0 {total_rows + 1} else {total_rows};
+        if total_cols == 0 {return} // short-circuiting opportunity
         eprintln!("Imposing matrix: {}x{}", total_rows, total_cols);
 
         let mut col_sizes: Vec<SizeGrouping> = Vec::with_capacity(total_cols as usize);
@@ -440,16 +439,6 @@ impl TableLayout {
                     match cp.colspan {
                         // If a cell has a span of zero, that is kind of stupid and it basically doesn't exist.
                         0 => {},
-                        // Single span column is easy; we just combine size preferences.
-                        1 => {
-                            if cp.flags.contains(CellFlags::ExpandHorizontal) {
-                                has_xexpand[col as usize] = true
-                            }
-                            row_sizes[row as usize] = SizeGrouping::join(&row_sizes[row as usize], &cp.size);
-                            col_sizes[col as usize] = SizeGrouping::join(&col_sizes[col as usize], &cp.size);
-                            col += 1;
-                        }
-                        // Multi column is derpy since we have to spread the constraints across each column.
                         _ => {
                             let midget = cp.size.spread(f32::from(cp.colspan));
                             row_sizes[row as usize] = SizeGrouping::join(&row_sizes[row as usize], &cp.size);
@@ -482,12 +471,11 @@ impl TableLayout {
 
         if error > 0.0 { // Extra space; relax the layout if we need to
             // Figure out how many columns are expanding horizontally.
-            let expansions = has_xexpand.iter().filter(|x| **x == true).count();
+            let expansions = has_xexpand.iter().filter(|x| **x).count();
             if expansions > 0 {
                 let amount = error / expansions as f32;
-                for (i, e) in has_xexpand.iter().filter(|x| **x == true).enumerate() {
-                    col_sizes[i].preferred.width =
-                        col_sizes[i].preferred.width + amount;
+                for (i, _e) in has_xexpand.iter().filter(|x| **x).enumerate() {
+                    col_sizes[i].preferred.width += amount;
                 }
             }
         } else if error < 0.0 { // Not enough space; tense up some more!
@@ -551,7 +539,7 @@ impl TableLayout {
                     0 => {}, // Ignore this cell.
                     _ => {
                         let mut width: f32 = 0.0;
-                        for i in 0..cp.colspan {
+                        for _i in 0..cp.colspan {
                             width += col_sizes[col as usize].preferred.width;
                             col += 1;
                         }
