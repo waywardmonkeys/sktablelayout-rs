@@ -432,6 +432,11 @@ impl TableLayout {
             has_xexpand.push(false);
         }
 
+        let mut has_yexpand: Vec<bool> = Vec::with_capacity(total_rows as usize);
+        for _i in 0..total_rows {
+            has_yexpand.push(false);
+        }
+
         // We determine size preferences for each column in the layout.
         for op in &self.opcodes {
             match op {
@@ -445,6 +450,9 @@ impl TableLayout {
                             for _i in 0..cp.colspan {
                                 if cp.flags.contains(CellFlags::ExpandHorizontal) {
                                     has_xexpand[col as usize] = true
+                                }
+                                if cp.flags.contains(CellFlags::ExpandVertical) {
+                                    has_yexpand[row as usize] = true
                                 }
                                 col_sizes[col as usize] = SizeGrouping::join(&col_sizes[col as usize], &midget);
                                 col += 1;
@@ -505,7 +513,14 @@ impl TableLayout {
 	}
 
         if error > 0.0 { // Extra space; relax the layout if we need to
-            // TODO: done for now!
+            // Figure out how many columns are expanding horizontally.
+            let expansions = has_yexpand.iter().filter(|y| **y).count();
+            if expansions > 0 {
+                let amount = error / expansions as f32;
+                for (i, _e) in has_yexpand.iter().filter(|y| **y).enumerate() {
+                    row_sizes[i].preferred.height += amount;
+                }
+            }
         } else if error < 0.0 { // Not enough space; tense up some more!
             // We need to find slack space for each column
             let mut total_slack: f32 = 0.0;
