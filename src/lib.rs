@@ -549,21 +549,6 @@ impl TableLayout {
                 // Something that needs to be placed.
                 LayoutOp::Cell(cp) => match &cp.colspan {
                     0 => {}, // Ignore this cell.
-                    1 => {
-                        let width = col_sizes[col as usize].preferred.width;
-                        let s = Size{width, height};
-                        let (bx, by, bw, bh) = cp.size.box_fit(&s, cp.flags);
-
-                        // Run callback to impose layout.
-                        match &mut cp.callback {
-                            Some(cb) => {
-                                (*cb)(x+bx, y+by, bw, bh);
-                            }
-                            None => {},
-                        }
-
-                        x += width;
-                    },
                     _ => {
                         let mut width: f32 = 0.0;
                         for i in 0..cp.colspan {
