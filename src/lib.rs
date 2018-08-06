@@ -413,7 +413,7 @@ impl TableLayout {
 
         let (total_rows, total_cols) = self.get_rows_cols();
         if total_cols == 0 {return}
-        let total_rows = if total_rows == 0 { 1 } else { total_rows };
+        let total_rows = if self.column > 0 {total_rows + 1} else {total_rows};
         eprintln!("Imposing matrix: {}x{}", total_rows, total_cols);
 
         let mut col_sizes: Vec<SizeGrouping> = Vec::with_capacity(total_cols as usize);
@@ -428,6 +428,11 @@ impl TableLayout {
             row_sizes.push(Default::default());
         }
 
+        let mut has_xexpand: Vec<bool> = Vec::with_capacity(total_cols as usize);
+        for _i in 0..total_cols {
+            has_xexpand.push(false);
+        }
+
         // We determine size preferences for each column in the layout.
         for op in &self.opcodes {
             match op {
@@ -437,6 +442,9 @@ impl TableLayout {
                         0 => {},
                         // Single span column is easy; we just combine size preferences.
                         1 => {
+                            if cp.flags.contains(CellFlags::ExpandHorizontal) {
+                                has_xexpand[col as usize] = true
+                            }
                             row_sizes[row as usize] = SizeGrouping::join(&row_sizes[row as usize], &cp.size);
                             col_sizes[col as usize] = SizeGrouping::join(&col_sizes[col as usize], &cp.size);
                             col += 1;
@@ -446,6 +454,9 @@ impl TableLayout {
                             let midget = cp.size.spread(f32::from(cp.colspan));
                             row_sizes[row as usize] = SizeGrouping::join(&row_sizes[row as usize], &cp.size);
                             for _i in 0..cp.colspan {
+                                if cp.flags.contains(CellFlags::ExpandHorizontal) {
+                                    has_xexpand[col as usize] = true
+                                }
                                 col_sizes[col as usize] = SizeGrouping::join(&col_sizes[col as usize], &midget);
                                 col += 1;
                             }
@@ -470,7 +481,15 @@ impl TableLayout {
         }
 
         if error > 0.0 { // Extra space; relax the layout if we need to
-            // TODO: done for now!
+            // Figure out how many columns are expanding horizontally.
+            let expansions = has_xexpand.iter().filter(|x| **x == true).count();
+            if expansions > 0 {
+                let amount = error / expansions as f32;
+                for (i, e) in has_xexpand.iter().filter(|x| **x == true).enumerate() {
+                    col_sizes[i].preferred.width =
+                        col_sizes[i].preferred.width + amount;
+                }
+            }
         } else if error < 0.0 { // Not enough space; tense up some more!
             // We need to find slack space for each column
             let mut total_slack: f32 = 0.0;
@@ -545,7 +564,25 @@ impl TableLayout {
 
                         x += width;
                     },
-                    _ => panic!("Not implemente.d"),
+                    _ => {
+                        let mut width: f32 = 0.0;
+                        for i in 0..cp.colspan {
+                            width += col_sizes[col as usize].preferred.width;
+                            col += 1;
+                        }
+                        let s = Size{width, height};
+                        let (bx, by, bw, bh) = cp.size.box_fit(&s, cp.flags);
+
+                        // Run callback to impose layout.
+                        match &mut cp.callback {
+                            Some(cb) => {
+                                (*cb)(x+bx, y+by, bw, bh);
+                            }
+                            None => {},
+                        }
+
+                        x += width;
+                    }
                 },
                 // Increment to next row; reset placement cursors.
                 LayoutOp::Row => {
