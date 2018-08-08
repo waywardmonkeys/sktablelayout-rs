@@ -719,6 +719,24 @@ mod test {
         engine.impose(32.0, 32.0);
     }
 
+    #[test]
+    fn centered_layout() {
+        let mut engine = TableLayout::new();
+        engine.with_cell(CellProperties::new()
+                        .callback(Box::new(|x, y, w, h| {
+                            println!("{} {} {} {}", x, y, w, h);
+                            assert_eq!(x, 16.0);
+                            assert_eq!(y, 16.0);
+                            assert_eq!(w, 32.0);
+                            assert_eq!(h, 32.0);
+                        }))
+                        .anchor_horizontal_center()
+                        .anchor_vertical_center()
+                        .expand()
+                        .preferred_size(Size{width: 32.0, height: 32.0}));
+        engine.impose(64.0, 64.0);
+    }
+
     #[bench]
     fn impose2x3(b: &mut test::Bencher) {
         // We only test the speed of layout calculation here, not
