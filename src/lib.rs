@@ -7,15 +7,6 @@ use std::f32;
 use std::cmp::max;
 use std::collections::BTreeMap;
 
-/// Rectangle for padding and spacing constraints.
-#[derive(Clone)]
-pub struct Rectangle {
-    pub top:    f32,
-    pub left:   f32,
-    pub bottom: f32,
-    pub right:  f32,
-}
-
 /// Individual size constraint for a cell.
 #[derive(Clone)]
 pub struct Size {
